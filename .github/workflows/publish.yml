@@ -1,12 +1,11 @@
 name: Publish to npm
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: "Version bump type"
-        required: false
-        default: "patch"
+  push:
+    branches:
+      - master
+    paths:
+      - "package.json"
 
 permissions:
   id-token: write
@@ -16,16 +15,20 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - run: npm install
+      - name: Install dependencies
+        run: npm install
 
-      - run: npm publish --access public
+      - name: Publish
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: false

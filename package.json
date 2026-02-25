@@ -1,7 +1,11 @@
 {
-  "name": "opencode-anthropic-auth",
+  "name": "@ex-machina/opencode-anthropic-auth",
   "version": "0.0.13",
   "main": "./index.mjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ex-machina-co/opencode-anthropic-auth"
+  },
   "devDependencies": {
     "@opencode-ai/plugin": "^0.4.45"
   },
