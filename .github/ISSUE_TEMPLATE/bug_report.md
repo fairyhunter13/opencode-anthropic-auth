@@ -1,8 +1,8 @@
 ---
 name: Bug report
 about: Create a report to help us improve
-title: ''
-labels: ''
+title: "[BUG]"
+labels: bug
 assignees: ''
 
 ---
@@ -11,6 +11,8 @@ assignees: ''
 >  Did you clear your cache and install the latest version before making this report?
 > 
 > `rm -rf ~/.cache/opencode` and checking your `opencode.json` version pin?
+>
+> Please remove this block to signal that you have tried the above, before posting a bug report.
 
 **Describe the bug**
 A clear and concise description of what the bug is.
