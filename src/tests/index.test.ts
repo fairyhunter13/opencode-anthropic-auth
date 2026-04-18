@@ -57,7 +57,6 @@ function fireConcurrentFetches(result: { fetch: typeof fetch }) {
 
 async function getPlugin(client?: ReturnType<typeof createMockClient>) {
   return (await AnthropicAuthPlugin({
-    // @ts-expect-error: minimal mock for testing
     client: client ?? createMockClient(),
   })) as Promise<any>
 }
@@ -124,6 +123,75 @@ describe('auth.loader', () => {
       { models: {} },
     )
     expect(result).toEqual({})
+  })
+
+  test('returns empty object when getAuth returns undefined', async () => {
+    const plugin = await getPlugin()
+    const result = await plugin.auth.loader(
+      () => Promise.resolve(undefined),
+      { models: {} },
+    )
+    expect(result).toEqual({})
+  })
+
+  test('returns empty object when getAuth returns null', async () => {
+    const plugin = await getPlugin()
+    const result = await plugin.auth.loader(
+      () => Promise.resolve(null),
+      { models: {} },
+    )
+    expect(result).toEqual({})
+  })
+
+  test('does not crash when getAuth returns undefined with models present', async () => {
+    const plugin = await getPlugin()
+    const models = {
+      'claude-sonnet-4-20250514': {
+        cost: { input: 3, output: 15, cache: { read: 0.3, write: 3.75 } },
+      },
+    }
+    const result = await plugin.auth.loader(
+      () => Promise.resolve(undefined),
+      { models },
+    )
+    expect(result).toEqual({})
+    // model costs should NOT be zeroed out since we're not oauth
+    expect(models['claude-sonnet-4-20250514'].cost.input).toBe(3)
+  })
+
+  test('fetch wrapper handles getAuth returning undefined mid-session', async () => {
+    // Start with valid oauth to get fetch wrapper
+    globalThis.fetch = mock(() =>
+      Promise.resolve(new Response(null, { status: 200 })),
+    ) as unknown as typeof fetch
+
+    const plugin = await getPlugin()
+    let callCount = 0
+    const result = await plugin.auth.loader(
+      () => {
+        callCount++
+        // First call (during loader init): return oauth
+        if (callCount === 1) {
+          return Promise.resolve({
+            type: 'oauth',
+            access: 'token',
+            refresh: 'refresh',
+            expires: Date.now() + 100000,
+          })
+        }
+        // Subsequent calls (during fetch): return undefined — simulates credential disappearing
+        return Promise.resolve(undefined)
+      },
+      { models: {} },
+    )
+
+    // fetch wrapper should fall back to plain fetch without crashing
+    const response = await result.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      body: '{}',
+    })
+    expect(response).toBeDefined()
+    expect(response.status).toBe(200)
   })
 
   test('zeros out model costs for oauth auth', async () => {
