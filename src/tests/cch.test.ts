@@ -40,7 +40,7 @@ describe('billing header helpers', () => {
         'sdk-cli',
       ),
     ).toBe(
-      'x-anthropic-billing-header: cc_version=2.1.87.6ff; cc_entrypoint=sdk-cli; cch=4ffc3;',
+      'x-anthropic-billing-header: cc_version=2.1.87.201; cc_entrypoint=sdk-cli; cch=e3b0c;',
     )
   })
 })

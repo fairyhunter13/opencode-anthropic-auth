@@ -1,6 +1,5 @@
-import type { Plugin } from '@opencode-ai/plugin'
-import { authorize, exchange } from './auth.ts'
-import { CLIENT_ID, TOKEN_URL } from './constants.ts'
+import { authorize, exchange } from "./auth.ts"
+import { CLIENT_ID, TOKEN_URL } from "./constants.ts"
 import {
   createStrippedStream,
   isInsecure,
@@ -8,12 +7,45 @@ import {
   rewriteRequestBody,
   rewriteUrl,
   setOAuthHeaders,
-} from './transform.ts'
+} from "./transform.ts"
+
+type Plugin = (ctx: { client: any }) => Promise<any>
 
 export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
   return {
     auth: {
-      provider: 'anthropic',
+      provider: "anthropic",
+      async refresher(info: { type: string; refresh?: string; access?: string; expires?: number }) {
+        if (info.type !== "oauth" || !info.refresh) return info
+        const response = await fetch(TOKEN_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json, text/plain, */*",
+            "User-Agent": "axios/1.13.6",
+          },
+          body: JSON.stringify({
+            grant_type: "refresh_token",
+            refresh_token: info.refresh,
+            client_id: CLIENT_ID,
+          }),
+        })
+        if (!response.ok) {
+          const body = await response.text().catch(() => "")
+          throw new Error(`Token refresh failed: ${response.status} — ${body}`)
+        }
+        const json = (await response.json()) as {
+          refresh_token: string
+          access_token: string
+          expires_in: number
+        }
+        return {
+          type: "oauth" as const,
+          refresh: json.refresh_token,
+          access: json.access_token,
+          expires: Date.now() + json.expires_in * 1000,
+        }
+      },
       async loader(
         getAuth: () => Promise<{
           type: string
@@ -24,7 +56,7 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
         provider: { models: Record<string, { cost: unknown }> },
       ) {
         const auth = await getAuth()
-        if (auth.type === 'oauth') {
+        if (auth?.type === "oauth") {
           // zero out cost for max plan
           for (const model of Object.values(provider.models)) {
             model.cost = {
@@ -42,10 +74,10 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
           let refreshPromise: Promise<string> | null = null
 
           return {
-            apiKey: '',
+            apiKey: "",
             async fetch(input: string | URL | Request, init?: RequestInit) {
               const auth = await getAuth()
-              if (auth.type !== 'oauth') return fetch(input, init)
+              if (auth?.type !== "oauth") return fetch(input, init)
               if (!auth.access || !auth.expires || auth.expires < Date.now()) {
                 if (!refreshPromise) {
                   refreshPromise = (async () => {
@@ -56,25 +88,24 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
                       try {
                         if (attempt > 0) {
                           const delay = baseDelayMs * 2 ** (attempt - 1)
-                          await new Promise((resolve) =>
-                            setTimeout(resolve, delay),
-                          )
+                          await new Promise((resolve) => setTimeout(resolve, delay))
                         }
 
                         // Re-read auth to get the latest refresh token.
                         // The outer `auth` snapshot may be stale if tokens
                         // were rotated since the fetch() call was made.
                         const freshAuth = await getAuth()
+                        if (!freshAuth || freshAuth.type !== "oauth") throw new Error("Credential no longer available")
 
                         const response = await fetch(TOKEN_URL, {
-                          method: 'POST',
+                          method: "POST",
                           headers: {
-                            'Content-Type': 'application/json',
-                            Accept: 'application/json, text/plain, */*',
-                            'User-Agent': 'axios/1.13.6',
+                            "Content-Type": "application/json",
+                            Accept: "application/json, text/plain, */*",
+                            "User-Agent": "axios/1.13.6",
                           },
                           body: JSON.stringify({
-                            grant_type: 'refresh_token',
+                            grant_type: "refresh_token",
                             refresh_token: freshAuth.refresh,
                             client_id: CLIENT_ID,
                           }),
@@ -86,10 +117,8 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
                             continue
                           }
 
-                          const body = await response.text().catch(() => '')
-                          throw new Error(
-                            `Token refresh failed: ${response.status} — ${body}`,
-                          )
+                          const body = await response.text().catch(() => "")
+                          throw new Error(`Token refresh failed: ${response.status} — ${body}`)
                         }
 
                         const json = (await response.json()) as {
@@ -98,29 +127,33 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
                           expires_in: number
                         }
 
-                        // biome-ignore lint/suspicious/noExplicitAny: SDK types don't expose auth.set
-                        await (client as any).auth.set({
-                          path: {
-                            id: 'anthropic',
-                          },
+                        // Write refreshed tokens back to the correct named credential slot.
+                        // getAuth.credentialName() returns the ALS-snapshotted name for this prompt,
+                        // ensuring mid-prompt refresh doesn't overwrite a different credential.
+                        // biome-ignore lint/suspicious/noExplicitAny: SDK types don't expose auth.set or query params
+                        const credName: string | undefined = await (getAuth as any).credentialName?.()
+                        const setOpts: any = {
+                          path: { id: "anthropic" },
                           body: {
-                            type: 'oauth',
+                            type: "oauth",
                             refresh: json.refresh_token,
                             access: json.access_token,
                             expires: Date.now() + json.expires_in * 1000,
                           },
-                        })
+                        }
+                        if (credName) setOpts.query = { name: credName }
+                        await (client as any).auth.set(setOpts)
 
                         return json.access_token
                       } catch (error) {
                         const isNetworkError =
                           error instanceof Error &&
-                          (error.message.includes('fetch failed') ||
-                            ('code' in error &&
-                              (error.code === 'ECONNRESET' ||
-                                error.code === 'ECONNREFUSED' ||
-                                error.code === 'ETIMEDOUT' ||
-                                error.code === 'UND_ERR_CONNECT_TIMEOUT')))
+                          (error.message.includes("fetch failed") ||
+                            ("code" in error &&
+                              (error.code === "ECONNRESET" ||
+                                error.code === "ECONNREFUSED" ||
+                                error.code === "ETIMEDOUT" ||
+                                error.code === "UND_ERR_CONNECT_TIMEOUT")))
 
                         if (attempt < maxRetries && isNetworkError) {
                           continue
@@ -131,7 +164,7 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
                     }
                     // Unreachable — each iteration either returns or throws.
                     // Kept as a TypeScript exhaustiveness guard.
-                    throw new Error('Token refresh exhausted all retries')
+                    throw new Error("Token refresh exhausted all retries")
                   })().finally(() => {
                     refreshPromise = null
                   })
@@ -144,7 +177,7 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
               setOAuthHeaders(requestHeaders, auth.access!)
 
               let body = init?.body
-              if (body && typeof body === 'string') {
+              if (body && typeof body === "string") {
                 body = rewriteRequestBody(body)
               }
 
@@ -166,61 +199,48 @@ export const AnthropicAuthPlugin: Plugin = async ({ client }) => {
       },
       methods: [
         {
-          label: 'Claude Pro/Max',
-          type: 'oauth',
+          label: "Claude Pro/Max",
+          type: "oauth",
           authorize: async () => {
-            const result = await authorize('max')
+            const result = await authorize("max")
             return {
               url: result.url,
-              instructions: 'Paste the authorization code here:',
-              method: 'code',
+              instructions: "Paste the authorization code here:",
+              method: "code",
               callback: async (code: string) => {
-                return exchange(
-                  code,
-                  result.verifier,
-                  result.redirectUri,
-                  result.state,
-                )
+                return exchange(code, result.verifier, result.redirectUri, result.state)
               },
             }
           },
         },
         {
-          label: 'Create an API Key',
-          type: 'oauth',
+          label: "Create an API Key",
+          type: "oauth",
           authorize: async () => {
-            const result = await authorize('console')
+            const result = await authorize("console")
             return {
               url: result.url,
-              instructions: 'Paste the authorization code here:',
-              method: 'code',
+              instructions: "Paste the authorization code here:",
+              method: "code",
               callback: async (code: string) => {
-                const credentials = await exchange(
-                  code,
-                  result.verifier,
-                  result.redirectUri,
-                  result.state,
-                )
-                if (credentials.type === 'failed') return credentials
-                const apiKey = await fetch(
-                  `https://api.anthropic.com/api/oauth/claude_cli/create_api_key`,
-                  {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      authorization: `Bearer ${credentials.access}`,
-                    },
+                const credentials = await exchange(code, result.verifier, result.redirectUri, result.state)
+                if (credentials.type === "failed") return credentials
+                const apiKey = await fetch(`https://api.anthropic.com/api/oauth/claude_cli/create_api_key`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    authorization: `Bearer ${credentials.access}`,
                   },
-                ).then((r) => r.json() as Promise<{ raw_key: string }>)
-                return { type: 'success' as const, key: apiKey.raw_key }
+                }).then((r) => r.json() as Promise<{ raw_key: string }>)
+                return { type: "success" as const, key: apiKey.raw_key }
               },
             }
           },
         },
         {
-          provider: 'anthropic',
-          label: 'Manually enter API Key',
-          type: 'api',
+          provider: "anthropic",
+          label: "Manually enter API Key",
+          type: "api",
         },
       ],
     },

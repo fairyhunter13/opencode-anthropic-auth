@@ -852,3 +852,85 @@ describe('sanitizeSystemText – realistic prompt', () => {
     expect(JSON.parse(result)).toMatchSnapshot()
   })
 })
+
+describe('cache_control passthrough', () => {
+  test('rewriteRequestBody removes top-level cache_control (avoids TTL conflict)', () => {
+    const body = JSON.stringify({
+      system: [{ type: 'text', text: 'Hello' }],
+      messages: [{ role: 'user', content: 'Hi' }],
+      cache_control: { type: 'ephemeral', ttl: '1h' },
+    })
+    const result = JSON.parse(rewriteRequestBody(body))
+    expect(result.cache_control).toBeUndefined()
+  })
+
+  test('rewriteRequestBody adds BP1 on last system block', () => {
+    const body = JSON.stringify({
+      system: [{ type: 'text', text: 'System prompt content here' }],
+      messages: [{ role: 'user', content: 'Hi' }],
+    })
+    const result = JSON.parse(rewriteRequestBody(body))
+    const lastSys = result.system[result.system.length - 1]
+    expect(lastSys.cache_control).toEqual({ type: 'ephemeral' })
+  })
+
+  test('rewriteRequestBody adds BP1 with TTL from top-level cache_control', () => {
+    const body = JSON.stringify({
+      system: [{ type: 'text', text: 'System prompt' }],
+      messages: [{ role: 'user', content: 'Hi' }],
+      cache_control: { type: 'ephemeral', ttl: '1h' },
+    })
+    const result = JSON.parse(rewriteRequestBody(body))
+    const lastSys = result.system[result.system.length - 1]
+    expect(lastSys.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+  })
+
+  test('rewriteRequestBody adds BP2 on last message content block', () => {
+    const body = JSON.stringify({
+      system: [{ type: 'text', text: 'System' }],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'Hello world' }] },
+      ],
+    })
+    const result = JSON.parse(rewriteRequestBody(body))
+    const lastMsg = result.messages[result.messages.length - 1]
+    const lastBlock = lastMsg.content[lastMsg.content.length - 1]
+    expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' })
+  })
+
+  test('rewriteRequestBody does NOT add cache_control to billing header (system[0])', () => {
+    const body = JSON.stringify({
+      system: [{ type: 'text', text: 'System prompt' }],
+      messages: [{ role: 'user', content: 'Hi' }],
+    })
+    const result = JSON.parse(rewriteRequestBody(body))
+    // system[0] is billing header, system[1] is identity, system[2] is original
+    expect(result.system[0].cache_control).toBeUndefined()
+  })
+
+  test('prependClaudeCodeIdentity preserves cache_control on existing system blocks', () => {
+    const system = [
+      { type: 'text', text: 'My prompt', cache_control: { type: 'ephemeral' } },
+    ]
+    const result = prependClaudeCodeIdentity(system)
+    // First block is identity (no cache_control), second preserves it
+    const original = result.find(b => b.text !== 'You are a Claude agent, built on Anthropic\'s Claude Agent SDK.')
+    expect(original?.cache_control).toEqual({ type: 'ephemeral' })
+  })
+
+  test('prefixToolNames preserves cache_control on tool_use blocks', () => {
+    const parsed = {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'read', id: 'test', cache_control: { type: 'ephemeral' } },
+          ],
+        },
+      ],
+    }
+    const result = JSON.parse(prefixToolNames(parsed as any))
+    expect(result.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' })
+    expect(result.messages[0].content[0].name).toBe('mcp_Read')
+  })
+})

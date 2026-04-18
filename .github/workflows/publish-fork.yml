@@ -1,0 +1,86 @@
+name: Publish @fairyhunter13/opencode-anthropic-auth
+
+on:
+  push:
+    branches:
+      - "enhancement/opencode-fork-compat"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (skip actual publish)"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Publish @fairyhunter13/opencode-anthropic-auth
+        id: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          # Get upstream published latest version
+          UPSTREAM=$(npm view @ex-machina/opencode-anthropic-auth version)
+          echo "Upstream version: ${UPSTREAM}"
+
+          # Set fork version with auto-increment
+          HIGHEST_N=$(npm view "@fairyhunter13/opencode-anthropic-auth" versions --json 2>/dev/null | \
+            node -e "
+              const vs = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              const prefix = '${UPSTREAM}-fork.';
+              const ns = (Array.isArray(vs) ? vs : [vs]).filter(v=>v.startsWith(prefix)).map(v=>parseInt(v.slice(prefix.length))).filter(n=>!isNaN(n));
+              console.log(ns.length ? Math.max(...ns)+1 : 0);
+            " 2>/dev/null || echo "0")
+          FORK_VERSION="${UPSTREAM}-fork.${HIGHEST_N}"
+          echo "Fork version: ${FORK_VERSION}"
+
+          # Rewrite package.json for publish
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.name = '@fairyhunter13/opencode-anthropic-auth';
+            pkg.version = '${FORK_VERSION}';
+            delete pkg.devDependencies;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            console.log('Ready to publish:', pkg.name + '@' + pkg.version);
+          "
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[dry-run] would publish @fairyhunter13/opencode-anthropic-auth@${FORK_VERSION}"
+          else
+            npm publish --access public --tag fork --provenance=false
+          fi
+
+          echo "version=${FORK_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Published versions" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | Version | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|---------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| @fairyhunter13/opencode-anthropic-auth | ${{ steps.publish.outputs.version }} | ${{ steps.publish.outputs.skipped == 'true' && 'skipped' || 'published' }} |" >> "$GITHUB_STEP_SUMMARY"

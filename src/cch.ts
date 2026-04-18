@@ -54,7 +54,12 @@ export function buildBillingHeaderValue(
   version: string = CLAUDE_CODE_VERSION,
   entrypoint: string,
 ): string {
-  const text = extractFirstUserMessageText(messages)
+  // Use empty string for a STABLE billing header hash across all turns.
+  // The original `extractFirstUserMessageText(messages)` created per-turn
+  // variation in system[0], busting Anthropic's automatic prompt cache on
+  // every API call and causing cr=0 (zero cache reads). Static text = stable
+  // billing header = stable system prefix = cache reads restored.
+  const text = ''
   const suffix = computeVersionSuffix(text, version)
   const cch = computeCCH(text)
 

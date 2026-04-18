@@ -358,6 +358,47 @@ export function rewriteRequestBody(body: string): string {
       parsed.system.unshift({ type: 'text', text: billingHeader })
     }
 
+    // Place explicit cache_control breakpoint on the last system block (BP1).
+    // Stabilizes the system+tools cache prefix across turns so the API can
+    // serve it from cache as messages accumulate (fixes 0% cache hit rate).
+    // We remove the top-level cache_control first: when both top-level and a
+    // per-block marker are present on the same block the API rejects them if
+    // TTLs differ. Taking ownership of the marker here avoids that conflict.
+    const topLevelTtl =
+      parsed.cache_control &&
+      typeof parsed.cache_control === 'object' &&
+      parsed.cache_control.ttl
+        ? (parsed.cache_control.ttl as string)
+        : undefined
+    delete parsed.cache_control
+
+    if (Array.isArray(parsed.system) && parsed.system.length > 0) {
+      const lastSys = parsed.system[parsed.system.length - 1]
+      if (lastSys && typeof lastSys === 'object') {
+        lastSys.cache_control = topLevelTtl
+          ? { type: 'ephemeral', ttl: topLevelTtl }
+          : { type: 'ephemeral' }
+      }
+    }
+
+    // BP2: Place cache_control on the last message's last content block.
+    // This caches the entire conversation prefix (system + tools + all prior
+    // messages). On the next turn, everything before this point is served
+    // from cache, and cache_read grows as the conversation accumulates.
+    if (Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+      const lastMsg = parsed.messages[parsed.messages.length - 1]
+      if (lastMsg && typeof lastMsg === 'object') {
+        if (Array.isArray(lastMsg.content) && lastMsg.content.length > 0) {
+          const lastBlock = lastMsg.content[lastMsg.content.length - 1]
+          if (lastBlock && typeof lastBlock === 'object') {
+            lastBlock.cache_control = { type: 'ephemeral' }
+          }
+        } else {
+          lastMsg.cache_control = { type: 'ephemeral' }
+        }
+      }
+    }
+
     return prefixToolNames(parsed)
   } catch {
     return body
