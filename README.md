@@ -1,11 +1,16 @@
 # OpenCode Anthropic Auth Plugin
 
-An [OpenCode](https://github.com/anomalyco/opencode) plugin that provides Anthropic OAuth authentication, enabling Claude Pro/Max users to use their subscription directly with OpenCode.
+> [!WARNING]
+> This plugin comes with no guarantees. You might be banned for breaking the TOS, you might not be. I don't work at Anthropic, nor am I an attorney.
+>
+> Use your best judgment and don't try to abuse the subscriptions. Plugins like oh-my-openagent are _known_ to trigger bans. Please be careful when using Ralph loops or insanely heavy usage patterns.
 
 > [!IMPORTANT]
 > If you are seeing issues, please try to `rm -rf ~/.cache/opencode` and check your `opencode.json` config to make sure you're on the latest version.
 >
 > Try this FIRST before making an Issue. Thanks!
+
+An [OpenCode](https://github.com/anomalyco/opencode) plugin that provides Anthropic OAuth authentication, enabling Claude Pro/Max users to use their subscription directly with OpenCode.
 
 ## Usage
 
